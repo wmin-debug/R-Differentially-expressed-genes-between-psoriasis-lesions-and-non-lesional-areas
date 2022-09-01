@@ -1,0 +1,72 @@
+source("http://bioconductor.org/BiocLite.R")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install("impute")
+BiocManager::install("limma")
+BiocManager::install("pheatmap")
+install.packages("ggplot2")
+BiocManager::install("heatmap.2")
+install.packages("gplots")
+BiocManager::install("affy")
+BiocManager::install("affyPLM")
+
+setwd("C:\\Users\\Administrator\\Desktop\\GSE121212_readcount.txt")
+A<-read.table("PSO-lesion.txt",header=T,sep="\t",row.names=1)
+B<-read.table("PSO-nonlesion.txt",header=T,sep="\t",row.names=1)
+probeid<-rownames(A) 
+probeid<-rownames(B) 
+#将A和B合并
+merge_exprs<-merge(A,B,by="probeid")
+write.table(merge_exprs,file="merge_matrix.txt",sep='\t',quote=F,row.names=F)
+
+library(impute)
+rt<-read.table("merge_matrix.txt",header=T,sep="\t",row.names=1)
+rt<-as.matrix(rt)
+imputed_gene_exp<-impute.knn(gene_exp_matrix,k=10,rowmax=0.5,colmax=0.8,maxp=3000,rng.seed=362436069)   #knn最邻近算法
+GeneExp<-imputed_gene_exp$data   #读出经过缺失值处理的数据
+genesymbol<-rownames(rt)  
+GeneExp<-cbind(genesymbol,GeneExp)
+write.table(GeneExp,file="input.txt",sep='\t',quote=F,row.names=F)  #分组写入表格
+
+library(limma)
+rt<-read.table("merge_matrix.txt",header=T,sep="\t",row.names=1)
+#differential差异表达
+class<-c(rep("psoLS ",28),rep("normal ",27))    #样本数目需要修改
+design<-model.matrix(~factor(class))
+colnames(design)<-c("psoLS "," normal ")
+fit<-lmFit(rt,design)
+colnames(design)<-c("psoLS","normal")
+fit<-lmFit(rt,design)
+fit2<-eBayes(fit)
+allDiff=topTable(fit2,adjust='fdr',coef=2,number=31340)
+write.table(allDiff,file="limmaTab.xls",sep="\t",quote=F)
+#write table
+diffLab<-allDiff[with(allDiff, ((logFC>2 |logFC<(-2)) & adj.P.Val<0.01)),]
+write.table(diffLab,file="diffEXp.xls",sep="\t",quote=F)
+#差异表达
+diffExpLevel<-rt[rownames(diffLab),]
+qvalue=allDiff[rownames(diffLab),]$adj.P.Val
+diffExpQvalue=cbind(qvalue,diffExpLevel)
+write.table(diffExpQvalue,file="diffExpLevel.xls",sep="\t",quote=F)
+
+#heatmap
+hmExp=log10(diffExpLevel+0.00001)
+library('gplots')
+hmMat=as.matrix(hmExp)
+pdf(file="heatmap.pdf",height=120,width=90)
+par(oma=c(3,3,3,5))
+heatmap.2(hmMat,col='greenred',trace="none",cexCol=1)
+dev.off()
+
+#volcano
+pdf(file="vol.pdf")
+xMax=max(-log10(allDiff$adj.P.Val))
+yMax=max(abs(allDiff$logFC))
+plot(-log10(allDiff$adj.P.Val),allDiff$logFC,xlab="adj.P.Val",ylab="logFC",main="Volcano",xlim=c(0,xMax),ylim=c(-yMax,yMax),pch=20,cex=0.4)
+diffSub=subset(allDiff, P.Value<0.01 & logFC>2)
+points(-log10(diffSub$P.Value), diffSub$logFC, pch=20, col="red",cex=0.4)
+diffSub=subset(allDiff, P.Value<0.01 & logFC<(-2))
+points(-log10(diffSub$P.Value), diffSub$logFC, pch=20, col="green",cex=0.4)
+abline(h=0,lty=2,lwd=3)
+dev.off()
+q()
